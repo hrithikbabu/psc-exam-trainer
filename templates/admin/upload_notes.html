@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Upload Notes — PSC Trainer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-upload"></i> Upload Study Notes</h1>
+  <p>Upload PDF notes for students to download.</p>
+</div>
+<div style="max-width:500px;margin:0 auto;padding:0 1.5rem;">
+  {% if msg %}<div class="alert alert-success">{{ msg }}</div>{% endif %}
+  <div class="card">
+    <div class="card-body">
+      <form method="POST" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:1.2rem;">
+        <div class="form-group"><label>Title</label><input type="text" name="title" placeholder="e.g. Kerala History Notes" required/></div>
+        <div class="form-group">
+          <label>Subject</label>
+          <select name="subject" required>
+            <option value="">Select subject</option>
+            <option>Kerala History</option><option>Indian History</option>
+            <option>General Knowledge</option><option>Current Affairs</option>
+            <option>Mathematics</option><option>Science</option>
+            <option>Malayalam</option><option>English</option>
+          </select>
+        </div>
+        <div class="form-group"><label>PDF File</label><input type="file" name="file" accept=".pdf" required/></div>
+        <button type="submit" class="btn btn-primary btn-full"><i class="fas fa-cloud-upload-alt"></i> Upload Notes</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

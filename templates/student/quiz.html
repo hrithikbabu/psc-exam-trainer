@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Mock Test — PSC Trainer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-pen"></i> Mock Test</h1>
+  <p>Test your Kerala PSC knowledge — 10 questions, 10 minutes.</p>
+</div>
+
+<div class="quiz-container" id="quiz-area">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+    <span>{{ questions|length }} Questions</span>
+    <span class="timer" id="timer">10:00</span>
+  </div>
+
+  {% if questions %}
+    {% for q in questions %}
+    <div class="question-card" style="margin-bottom:1.5rem;">
+      <p class="question-text">{{ loop.index }}. {{ q.question }}</p>
+      <div class="options">
+        {% for option in q.options %}
+        <button class="option-btn" data-qid="{{ q.id }}" data-option="{{ option }}">
+          {{ option }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <div style="text-align:center;margin-top:2rem;">
+      <button onclick="submitQuiz()" class="btn btn-primary btn-lg">
+        <i class="fas fa-check"></i> Submit Test
+      </button>
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="card-body" style="text-align:center;padding:3rem;">
+        <i class="fas fa-circle-info" style="font-size:2.5rem;color:var(--accent);margin-bottom:1rem;display:block;"></i>
+        <h3>No questions yet</h3>
+        <p style="color:var(--gray-500);margin-top:0.5rem;">Admin hasn't added any questions yet. Check back later!</p>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>startTimer(600);</script>
+{% endblock %}

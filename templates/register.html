@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Register — PSC Trainer{% endblock %}
+{% block content %}
+<div class="auth-container">
+  <div class="auth-card">
+    <div class="auth-header">
+      <i class="fas fa-brain auth-logo"></i>
+      <h2>Create Account</h2>
+      <p>Join thousands of Kerala PSC aspirants</p>
+    </div>
+    {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+    <form method="POST" class="auth-form">
+      <div class="form-group">
+        <label><i class="fas fa-user"></i> Full Name</label>
+        <input type="text" name="name" placeholder="Your full name" required/>
+      </div>
+      <div class="form-group">
+        <label><i class="fas fa-envelope"></i> Email</label>
+        <input type="email" name="email" placeholder="your@email.com" required/>
+      </div>
+      <div class="form-group">
+        <label><i class="fas fa-lock"></i> Password</label>
+        <input type="password" name="password" placeholder="Min 6 characters" required/>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">
+        <i class="fas fa-user-plus"></i> Create Account
+      </button>
+    </form>
+    <p class="auth-switch">Already have an account? <a href="{{ url_for('login') }}">Login here</a></p>
+  </div>
+</div>
+{% endblock %}

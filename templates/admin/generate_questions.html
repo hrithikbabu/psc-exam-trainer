@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}AI Generate Questions — PSC Trainer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-robot"></i> AI Question Generator</h1>
+  <p>Let AI create fresh Kerala PSC questions automatically.</p>
+</div>
+<div style="max-width:600px;margin:0 auto;padding:0 1.5rem;">
+  {% if msg %}<div class="alert alert-success">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-body">
+      <form method="POST" style="display:flex;flex-direction:column;gap:1.2rem;">
+        <div class="form-group">
+          <label>Subject</label>
+          <select name="subject" required>
+            <option value="">Select subject</option>
+            <option>Kerala History</option><option>Indian History</option>
+            <option>General Knowledge</option><option>Current Affairs</option>
+            <option>Mathematics</option><option>Science</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Difficulty</label>
+          <select name="difficulty" required>
+            <option>Easy</option><option>Medium</option><option>Hard</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Number of Questions</label>
+          <select name="count">
+            <option value="5">5</option><option value="10">10</option><option value="15">15</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full"><i class="fas fa-wand-magic-sparkles"></i> Generate Questions</button>
+      </form>
+    </div>
+  </div>
+
+  {% if questions %}
+  <div class="card">
+    <div class="card-header"><h3>Generated Questions</h3></div>
+    <div class="card-body">
+      {% for q in questions %}
+      <div style="margin-bottom:1.2rem;padding-bottom:1.2rem;border-bottom:1px solid var(--gray-100);">
+        <p><strong>{{ loop.index }}. {{ q.question }}</strong></p>
+        {% for opt in q.options %}
+        <p style="color:var(--gray-500);font-size:0.9rem;margin-left:1rem;">{{ opt }}</p>
+        {% endfor %}
+        <p style="color:var(--success);font-size:0.85rem;margin-top:0.3rem;"><strong>Answer:</strong> {{ q.answer }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
