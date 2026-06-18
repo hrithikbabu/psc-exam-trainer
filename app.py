@@ -5,8 +5,6 @@ import cloudinary
 import cloudinary.uploader
 from groq import Groq
 import PyPDF2
-import firebase_admin
-from firebase_admin import credentials, firestore, auth
 import requests
 import json
 
@@ -25,23 +23,82 @@ cloudinary.config(
 # ── Groq AI Setup ─────────────────────────────────────────
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# ── Firebase Setup (using env variables) ─────────────────
-if not firebase_admin._apps:
-    firebase_creds = {
-        "type": "service_account",
-        "project_id": os.getenv("FIREBASE_PROJECT_ID"),
-        "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
-        "private_key": os.getenv("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n"),
-        "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
-        "client_id": os.getenv("FIREBASE_CLIENT_ID"),
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-    }
-    cred = credentials.Certificate(firebase_creds)
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
+# ── Firebase Config ───────────────────────────────────────
+FIREBASE_API_KEY    = os.getenv("FIREBASE_API_KEY")
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")
+FIRESTORE_URL       = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents"
 
-FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY")
+# ── Firebase REST Helpers ─────────────────────────────────
+def firestore_get(collection, doc_id):
+    url = f"{FIRESTORE_URL}/{collection}/{doc_id}"
+    res = requests.get(url)
+    if res.status_code == 200:
+        return parse_firestore(res.json())
+    return None
+
+def firestore_set(collection, doc_id, data):
+    url = f"{FIRESTORE_URL}/{collection}/{doc_id}"
+    body = {"fields": to_firestore(data)}
+    requests.patch(url, json=body)
+
+def firestore_add(collection, data):
+    url = f"{FIRESTORE_URL}/{collection}"
+    body = {"fields": to_firestore(data)}
+    requests.post(url, json=body)
+
+def firestore_list(collection, limit=100):
+    url = f"{FIRESTORE_URL}/{collection}?pageSize={limit}"
+    res = requests.get(url)
+    if res.status_code == 200:
+        docs = res.json().get("documents", [])
+        result = []
+        for doc in docs:
+            d = parse_firestore(doc)
+            d["id"] = doc["name"].split("/")[-1]
+            result.append(d)
+        return result
+    return []
+
+def to_firestore(data):
+    fields = {}
+    for k, v in data.items():
+        if isinstance(v, str):
+            fields[k] = {"stringValue": v}
+        elif isinstance(v, int):
+            fields[k] = {"integerValue": str(v)}
+        elif isinstance(v, float):
+            fields[k] = {"doubleValue": v}
+        elif isinstance(v, bool):
+            fields[k] = {"booleanValue": v}
+        elif isinstance(v, list):
+            fields[k] = {"arrayValue": {"values": [{"stringValue": str(i)} for i in v]}}
+    return fields
+
+def parse_firestore(doc):
+    result = {}
+    for k, v in doc.get("fields", {}).items():
+        if "stringValue" in v:
+            result[k] = v["stringValue"]
+        elif "integerValue" in v:
+            result[k] = int(v["integerValue"])
+        elif "doubleValue" in v:
+            result[k] = v["doubleValue"]
+        elif "booleanValue" in v:
+            result[k] = v["booleanValue"]
+        elif "arrayValue" in v:
+            result[k] = [i.get("stringValue", "") for i in v["arrayValue"].get("values", [])]
+    return result
+
+# ── Firebase Auth REST ────────────────────────────────────
+def firebase_register(email, password, name):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FIREBASE_API_KEY}"
+    res = requests.post(url, json={"email": email, "password": password, "displayName": name, "returnSecureToken": True})
+    return res.json()
+
+def firebase_login(email, password):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
+    res = requests.post(url, json={"email": email, "password": password, "returnSecureToken": True})
+    return res.json()
 
 # ── Helper: Ask Groq AI ───────────────────────────────────
 def ask_ai(prompt, system="You are a helpful Kerala PSC exam tutor. Answer clearly and concisely."):
@@ -54,7 +111,6 @@ def ask_ai(prompt, system="You are a helpful Kerala PSC exam tutor. Answer clear
     )
     return response.choices[0].message.content
 
-# ── Helper: Check login ───────────────────────────────────
 def is_logged_in():
     return "user_id" in session
 
@@ -72,22 +128,20 @@ def index():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name  = request.form.get("name")
-        email = request.form.get("email")
+        name     = request.form.get("name")
+        email    = request.form.get("email")
         password = request.form.get("password")
-        try:
-            user = auth.create_user(email=email, password=password, display_name=name)
-            db.collection("users").document(user.uid).set({
-                "name": name,
-                "email": email,
-                "role": "student",
-                "score": 0,
-                "streak": 0,
-                "joined": firestore.SERVER_TIMESTAMP
+        data = firebase_register(email, password, name)
+        if "idToken" in data:
+            uid = data["localId"]
+            firestore_set("users", uid, {
+                "name": name, "email": email,
+                "role": "student", "score": 0, "streak": 0
             })
             return redirect(url_for("login", msg="Registration successful! Please login."))
-        except Exception as e:
-            return render_template("register.html", error=str(e))
+        else:
+            error = data.get("error", {}).get("message", "Registration failed")
+            return render_template("register.html", error=error)
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -96,14 +150,10 @@ def login():
     if request.method == "POST":
         email    = request.form.get("email")
         password = request.form.get("password")
-        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
-        payload = {"email": email, "password": password, "returnSecureToken": True}
-        res = requests.post(url, json=payload)
-        data = res.json()
+        data = firebase_login(email, password)
         if "idToken" in data:
-            uid = data["localId"]
-            user_doc = db.collection("users").document(uid).get()
-            user_data = user_doc.to_dict()
+            uid       = data["localId"]
+            user_data = firestore_get("users", uid) or {}
             session["user_id"]   = uid
             session["user_name"] = user_data.get("name", email)
             session["email"]     = email
@@ -129,40 +179,31 @@ def logout():
 def student_dashboard():
     if not is_logged_in():
         return redirect(url_for("login"))
-    user_doc = db.collection("users").document(session["user_id"]).get().to_dict()
-    return render_template("student/dashboard.html", user=user_doc)
+    user = firestore_get("users", session["user_id"]) or {}
+    return render_template("student/dashboard.html", user=user)
 
 @app.route("/student/quiz")
 def quiz():
     if not is_logged_in():
         return redirect(url_for("login"))
-    questions = []
-    docs = db.collection("questions").limit(10).stream()
-    for doc in docs:
-        q = doc.to_dict()
-        q["id"] = doc.id
-        questions.append(q)
+    questions = firestore_list("questions", limit=10)
     return render_template("student/quiz.html", questions=questions)
 
 @app.route("/student/submit_quiz", methods=["POST"])
 def submit_quiz():
     if not is_logged_in():
         return redirect(url_for("login"))
-    data = request.get_json()
+    data    = request.get_json()
     answers = data.get("answers", {})
-    score = 0
-    total = len(answers)
+    score   = 0
+    total   = len(answers)
     for qid, selected in answers.items():
-        doc = db.collection("questions").document(qid).get()
-        if doc.exists:
-            correct = doc.to_dict().get("answer")
-            if selected == correct:
-                score += 1
-    db.collection("results").add({
+        q = firestore_get("questions", qid)
+        if q and q.get("answer") == selected:
+            score += 1
+    firestore_add("results", {
         "user_id": session["user_id"],
-        "score": score,
-        "total": total,
-        "timestamp": firestore.SERVER_TIMESTAMP
+        "score": score, "total": total
     })
     return jsonify({"score": score, "total": total})
 
@@ -170,12 +211,7 @@ def submit_quiz():
 def notes():
     if not is_logged_in():
         return redirect(url_for("login"))
-    notes_list = []
-    docs = db.collection("notes").stream()
-    for doc in docs:
-        n = doc.to_dict()
-        n["id"] = doc.id
-        notes_list.append(n)
+    notes_list = firestore_list("notes")
     return render_template("student/notes.html", notes=notes_list)
 
 @app.route("/student/chatbot")
@@ -189,35 +225,27 @@ def ask_doubt():
     if not is_logged_in():
         return jsonify({"error": "Not logged in"})
     question = request.get_json().get("question", "")
-    answer = ask_ai(f"PSC Exam question: {question}")
+    answer   = ask_ai(f"Kerala PSC exam question: {question}")
     return jsonify({"answer": answer})
 
 @app.route("/student/leaderboard")
 def leaderboard():
     if not is_logged_in():
         return redirect(url_for("login"))
-    users = []
-    docs = db.collection("users").order_by("score", direction=firestore.Query.DESCENDING).limit(10).stream()
-    for doc in docs:
-        u = doc.to_dict()
-        u["id"] = doc.id
-        users.append(u)
+    users = firestore_list("users", limit=10)
+    users.sort(key=lambda x: x.get("score", 0), reverse=True)
     return render_template("student/leaderboard.html", users=users)
 
 @app.route("/student/evaluate_answer", methods=["POST"])
 def evaluate_answer():
     if not is_logged_in():
         return jsonify({"error": "Not logged in"})
-    data = request.get_json()
-    question = data.get("question", "")
+    data           = request.get_json()
+    question       = data.get("question", "")
     student_answer = data.get("answer", "")
     prompt = f"""PSC Exam Question: {question}
-Student's Answer: {student_answer}
-Evaluate this answer out of 10. Give:
-1. Score (X/10)
-2. What was correct
-3. What was missing
-4. The ideal answer"""
+Student Answer: {student_answer}
+Evaluate out of 10. Give: 1) Score 2) What was correct 3) What was missing 4) Ideal answer"""
     result = ask_ai(prompt, system="You are a strict but fair Kerala PSC exam evaluator.")
     return jsonify({"feedback": result})
 
@@ -229,16 +257,10 @@ def analyze_paper():
     if not file:
         return jsonify({"error": "No file uploaded"})
     reader = PyPDF2.PdfReader(file)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text()
+    text   = "".join([page.extract_text() for page in reader.pages])
     prompt = f"""Analyze this Kerala PSC previous year question paper:
 {text[:3000]}
-Provide:
-1. Most repeated topics
-2. Important subjects
-3. Question patterns
-4. Predictions for upcoming exams"""
+Give: 1) Most repeated topics 2) Important subjects 3) Question patterns 4) Predictions"""
     analysis = ask_ai(prompt, system="You are a Kerala PSC exam expert analyst.")
     return jsonify({"analysis": analysis})
 
@@ -250,54 +272,49 @@ Provide:
 def admin_dashboard():
     if not is_admin():
         return redirect(url_for("login"))
-    users_count = len(list(db.collection("users").stream()))
-    questions_count = len(list(db.collection("questions").stream()))
-    notes_count = len(list(db.collection("notes").stream()))
-    results_count = len(list(db.collection("results").stream()))
+    users     = firestore_list("users")
+    questions = firestore_list("questions")
+    notes     = firestore_list("notes")
+    results   = firestore_list("results")
     return render_template("admin/dashboard.html",
-        users=users_count, questions=questions_count,
-        notes=notes_count, results=results_count)
+        users=len(users), questions=len(questions),
+        notes=len(notes), results=len(results))
 
 @app.route("/admin/add_question", methods=["GET", "POST"])
 def add_question():
     if not is_admin():
         return redirect(url_for("login"))
     if request.method == "POST":
-        db.collection("questions").add({
-            "question": request.form.get("question"),
-            "options": [
-                request.form.get("option_a"),
-                request.form.get("option_b"),
-                request.form.get("option_c"),
-                request.form.get("option_d"),
-            ],
-            "answer": request.form.get("answer"),
-            "subject": request.form.get("subject"),
+        firestore_add("questions", {
+            "question":   request.form.get("question"),
+            "option_a":   request.form.get("option_a"),
+            "option_b":   request.form.get("option_b"),
+            "option_c":   request.form.get("option_c"),
+            "option_d":   request.form.get("option_d"),
+            "answer":     request.form.get("answer"),
+            "subject":    request.form.get("subject"),
             "difficulty": request.form.get("difficulty"),
         })
         return redirect(url_for("add_question", msg="Question added!"))
-    return render_template("admin/add_question.html", msg=request.args.get("msg",""))
+    return render_template("admin/add_question.html", msg=request.args.get("msg", ""))
 
 @app.route("/admin/upload_notes", methods=["GET", "POST"])
 def upload_notes():
     if not is_admin():
         return redirect(url_for("login"))
     if request.method == "POST":
-        file  = request.files.get("file")
-        title = request.form.get("title")
+        file    = request.files.get("file")
+        title   = request.form.get("title")
         subject = request.form.get("subject")
         if file:
-            result = cloudinary.uploader.upload(file,
-                resource_type="raw", folder="psc-notes")
-            db.collection("notes").add({
-                "title": title,
-                "subject": subject,
+            result = cloudinary.uploader.upload(file, resource_type="raw", folder="psc-notes")
+            firestore_add("notes", {
+                "title": title, "subject": subject,
                 "url": result["secure_url"],
-                "uploaded_by": session["user_name"],
-                "timestamp": firestore.SERVER_TIMESTAMP
+                "uploaded_by": session["user_name"]
             })
             return redirect(url_for("upload_notes", msg="Notes uploaded successfully!"))
-    return render_template("admin/upload_notes.html", msg=request.args.get("msg",""))
+    return render_template("admin/upload_notes.html", msg=request.args.get("msg", ""))
 
 @app.route("/admin/generate_ai_questions", methods=["GET", "POST"])
 def generate_ai_questions():
@@ -307,18 +324,18 @@ def generate_ai_questions():
         subject    = request.form.get("subject")
         difficulty = request.form.get("difficulty")
         count      = int(request.form.get("count", 5))
-        prompt = f"""Generate {count} Kerala PSC multiple choice questions on '{subject}' at '{difficulty}' difficulty.
-Return ONLY a JSON array like this:
-[{{"question": "...","options": ["A. ...","B. ...","C. ...","D. ..."],"answer": "A. ...","subject": "{subject}","difficulty": "{difficulty}"}}]"""
-        raw = ask_ai(prompt, system="You are a Kerala PSC question paper setter. Return only valid JSON.")
+        prompt = f"""Generate {count} Kerala PSC MCQ questions on '{subject}' at '{difficulty}' difficulty.
+Return ONLY a JSON array:
+[{{"question":"...","option_a":"...","option_b":"...","option_c":"...","option_d":"...","answer":"A","subject":"{subject}","difficulty":"{difficulty}"}}]"""
+        raw = ask_ai(prompt, system="You are a Kerala PSC question paper setter. Return only valid JSON array.")
         try:
-            start = raw.index("[")
-            end   = raw.rindex("]") + 1
+            start     = raw.index("[")
+            end       = raw.rindex("]") + 1
             questions = json.loads(raw[start:end])
             for q in questions:
-                db.collection("questions").add(q)
+                firestore_add("questions", q)
             return render_template("admin/generate_questions.html",
-                msg=f"{len(questions)} questions generated and saved!", questions=questions)
+                msg=f"{len(questions)} questions generated!", questions=questions)
         except Exception as e:
             return render_template("admin/generate_questions.html", error=str(e))
     return render_template("admin/generate_questions.html")
@@ -327,12 +344,7 @@ Return ONLY a JSON array like this:
 def manage_users():
     if not is_admin():
         return redirect(url_for("login"))
-    users = []
-    docs = db.collection("users").stream()
-    for doc in docs:
-        u = doc.to_dict()
-        u["id"] = doc.id
-        users.append(u)
+    users = firestore_list("users")
     return render_template("admin/users.html", users=users)
 
 if __name__ == "__main__":
