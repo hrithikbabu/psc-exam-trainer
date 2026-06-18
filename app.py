@@ -25,9 +25,19 @@ cloudinary.config(
 # ── Groq AI Setup ─────────────────────────────────────────
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# ── Firebase Setup ────────────────────────────────────────
+# ── Firebase Setup (using env variables) ─────────────────
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase-service-account.json")
+    firebase_creds = {
+        "type": "service_account",
+        "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+        "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+        "private_key": os.getenv("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n"),
+        "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+        "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -59,7 +69,6 @@ def is_admin():
 def index():
     return render_template("index.html")
 
-# ── Register ──────────────────────────────────────────────
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
@@ -81,14 +90,12 @@ def register():
             return render_template("register.html", error=str(e))
     return render_template("register.html")
 
-# ── Login ─────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
     msg = request.args.get("msg", "")
     if request.method == "POST":
         email    = request.form.get("email")
         password = request.form.get("password")
-        # Firebase REST API login
         url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
         payload = {"email": email, "password": password, "returnSecureToken": True}
         res = requests.post(url, json=payload)
@@ -109,7 +116,6 @@ def login():
             return render_template("login.html", error=error)
     return render_template("login.html", msg=msg)
 
-# ── Logout ────────────────────────────────────────────────
 @app.route("/logout")
 def logout():
     session.clear()
@@ -205,16 +211,13 @@ def evaluate_answer():
     data = request.get_json()
     question = data.get("question", "")
     student_answer = data.get("answer", "")
-    prompt = f"""
-    PSC Exam Question: {question}
-    Student's Answer: {student_answer}
-    
-    Evaluate this answer out of 10. Give:
-    1. Score (X/10)
-    2. What was correct
-    3. What was missing
-    4. The ideal answer
-    """
+    prompt = f"""PSC Exam Question: {question}
+Student's Answer: {student_answer}
+Evaluate this answer out of 10. Give:
+1. Score (X/10)
+2. What was correct
+3. What was missing
+4. The ideal answer"""
     result = ask_ai(prompt, system="You are a strict but fair Kerala PSC exam evaluator.")
     return jsonify({"feedback": result})
 
@@ -229,16 +232,13 @@ def analyze_paper():
     text = ""
     for page in reader.pages:
         text += page.extract_text()
-    prompt = f"""
-    Analyze this Kerala PSC previous year question paper:
-    {text[:3000]}
-    
-    Provide:
-    1. Most repeated topics
-    2. Important subjects
-    3. Question patterns
-    4. Predictions for upcoming exams
-    """
+    prompt = f"""Analyze this Kerala PSC previous year question paper:
+{text[:3000]}
+Provide:
+1. Most repeated topics
+2. Important subjects
+3. Question patterns
+4. Predictions for upcoming exams"""
     analysis = ask_ai(prompt, system="You are a Kerala PSC exam expert analyst.")
     return jsonify({"analysis": analysis})
 
@@ -288,8 +288,7 @@ def upload_notes():
         subject = request.form.get("subject")
         if file:
             result = cloudinary.uploader.upload(file,
-                resource_type="raw",
-                folder="psc-notes")
+                resource_type="raw", folder="psc-notes")
             db.collection("notes").add({
                 "title": title,
                 "subject": subject,
@@ -310,15 +309,7 @@ def generate_ai_questions():
         count      = int(request.form.get("count", 5))
         prompt = f"""Generate {count} Kerala PSC multiple choice questions on '{subject}' at '{difficulty}' difficulty.
 Return ONLY a JSON array like this:
-[
-  {{
-    "question": "...",
-    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
-    "answer": "A. ...",
-    "subject": "{subject}",
-    "difficulty": "{difficulty}"
-  }}
-]"""
+[{{"question": "...","options": ["A. ...","B. ...","C. ...","D. ..."],"answer": "A. ...","subject": "{subject}","difficulty": "{difficulty}"}}]"""
         raw = ask_ai(prompt, system="You are a Kerala PSC question paper setter. Return only valid JSON.")
         try:
             start = raw.index("[")
