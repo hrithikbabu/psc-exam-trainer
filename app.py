@@ -100,6 +100,13 @@ def firebase_login(email, password):
     res = requests.post(url, json={"email": email, "password": password, "returnSecureToken": True})
     return res.json()
 
+def firebase_send_password_reset(email):
+    """Asks Firebase to email the user a password reset link. Works for both
+    students and admins since they're all stored in the same Firebase Auth project."""
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FIREBASE_API_KEY}"
+    res = requests.post(url, json={"requestType": "PASSWORD_RESET", "email": email})
+    return res.json()
+
 # ── Helper: Ask Groq AI ───────────────────────────────────
 def ask_ai(prompt, system="You are a helpful Kerala PSC exam tutor. Answer clearly and concisely."):
     response = groq_client.chat.completions.create(
@@ -128,16 +135,22 @@ def index():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name     = request.form.get("name")
-        email    = request.form.get("email")
-        password = request.form.get("password")
+        name       = request.form.get("name")
+        email      = request.form.get("email")
+        password   = request.form.get("password")
+        admin_code = request.form.get("admin_code", "").strip()
         data = firebase_register(email, password, name)
         if "idToken" in data:
             uid = data["localId"]
+            # An account becomes admin ONLY if the correct secret code was entered.
+            # Set ADMIN_SECRET_CODE in your .env / Render environment variables.
+            role = "admin" if admin_code and admin_code == os.getenv("ADMIN_SECRET_CODE") else "student"
             firestore_set("users", uid, {
                 "name": name, "email": email,
-                "role": "student", "score": 0, "streak": 0
+                "role": role, "score": 0, "streak": 0
             })
+            if role == "admin":
+                return redirect(url_for("login", msg="Admin account created! Please login."))
             return redirect(url_for("login", msg="Registration successful! Please login."))
         else:
             error = data.get("error", {}).get("message", "Registration failed")
@@ -170,6 +183,17 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("index"))
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        firebase_send_password_reset(email)
+        # Always show the same message whether or not the email exists —
+        # this stops people from being able to guess which emails are registered.
+        return render_template("forgot_password.html",
+            msg="If that email is registered, a password reset link has been sent. Check your inbox (and spam folder).")
+    return render_template("forgot_password.html")
 
 # ══════════════════════════════════════════════════════════
 # STUDENT ROUTES
