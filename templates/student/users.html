@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Manage Users — PSC Trainer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-users"></i> Manage Users</h1>
+  <p>All registered students on the platform.</p>
+</div>
+<div style="padding:0 2rem;">
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Score</th>
+            <th>Streak</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td><strong>{{ user.name }}</strong></td>
+            <td>{{ user.email }}</td>
+            <td>
+              <span style="background:{% if user.role == 'admin' %}var(--primary-light){% else %}#D1FAE5{% endif %};
+                color:{% if user.role == 'admin' %}var(--primary){% else %}var(--success){% endif %};
+                padding:0.2rem 0.6rem;border-radius:6px;font-size:0.8rem;font-weight:600;">
+                {{ user.role|capitalize }}
+              </span>
+            </td>
+            <td>{{ user.score or 0 }}</td>
+            <td><i class="fas fa-fire" style="color:var(--warning);"></i> {{ user.streak or 0 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
