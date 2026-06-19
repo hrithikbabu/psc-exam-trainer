@@ -103,7 +103,7 @@ def firebase_login(email, password):
 # ── Helper: Ask Groq AI ───────────────────────────────────
 def ask_ai(prompt, system="You are a helpful Kerala PSC exam tutor. Answer clearly and concisely."):
     response = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt}
