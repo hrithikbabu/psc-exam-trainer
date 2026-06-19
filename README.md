@@ -28,4 +28,3 @@ A free, AI-powered web application for Kerala PSC exam preparation.
 3. Copy `.env.example` to `.env` and fill in your keys
 4. Add your `firebase-service-account.json`
 5. Run: `python app.py`
-6. btw still in devolopment 10% completed 19/06/2026 last update
