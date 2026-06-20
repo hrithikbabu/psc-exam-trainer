@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Exam Ended — {{ exam.title }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:500px;margin:3rem auto;text-align:center;">
+  <div class="card-body" style="padding:3rem;">
+    <i class="fas fa-flag-checkered" style="font-size:3rem;color:var(--gray-500);margin-bottom:1rem;display:block;"></i>
+    <h2 style="font-family:var(--font-display);margin-bottom:0.5rem;">This exam has ended</h2>
+    <p style="color:var(--gray-500);margin-bottom:1.5rem;">{{ exam.title }} is no longer accepting entries.</p>
+    <a href="{{ url_for('list_exams_student') }}" class="btn btn-primary">Back to Exams</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.title }} — Live View{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-satellite-dish"></i> {{ exam.title }}</h1>
+  <p>{{ exam.subject }} &nbsp;•&nbsp; {{ exam.duration_minutes }} minutes &nbsp;•&nbsp; Starts {{ exam.start_time[:16].replace('T', ' ') }}</p>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem;">
+  <div class="card"><div class="card-body" style="text-align:center;">
+    <div style="font-size:2rem;font-weight:700;color:var(--primary);" id="count-progress">{{ counts.in_progress }}</div>
+    <div style="color:var(--gray-500);">Currently Taking</div>
+  </div></div>
+  <div class="card"><div class="card-body" style="text-align:center;">
+    <div style="font-size:2rem;font-weight:700;color:var(--success);" id="count-submitted">{{ counts.submitted }}</div>
+    <div style="color:var(--gray-500);">Submitted</div>
+  </div></div>
+  <div class="card"><div class="card-body" style="text-align:center;">
+    <div style="font-size:2rem;font-weight:700;color:var(--danger);" id="count-disqualified">{{ counts.disqualified }}</div>
+    <div style="color:var(--gray-500);">Disqualified</div>
+  </div></div>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <div class="card-header"><h3><i class="fas fa-sliders"></i> Adjust Exam</h3></div>
+  <div class="card-body">
+    <form method="POST" action="{{ url_for('edit_exam_time', exam_id=exam.id) }}" style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;">
+      <div>
+        <label style="display:block;font-size:0.85rem;color:var(--gray-500);margin-bottom:0.3rem;">New Start Time</label>
+        <input type="datetime-local" name="start_time" style="padding:0.6rem;border:1px solid var(--gray-300);border-radius:8px;">
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;color:var(--gray-500);margin-bottom:0.3rem;">New Duration (min)</label>
+        <input type="number" name="duration_minutes" min="5" max="300" style="padding:0.6rem;border:1px solid var(--gray-300);border-radius:8px;width:120px;">
+      </div>
+      <button type="submit" class="btn btn-outline">Update</button>
+    </form>
+    <p style="color:var(--gray-500);font-size:0.85rem;margin-top:0.6rem;">
+      Note: changing the time after students have already joined will shift their remaining time too, since timing is calculated live from these values.
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3><i class="fas fa-users"></i> Live Attendance</h3></div>
+  <div class="card-body table-wrap">
+    <table style="width:100%;border-collapse:collapse;" id="attendance-table">
+      <thead>
+        <tr style="text-align:left;border-bottom:2px solid var(--gray-300);">
+          <th style="padding:0.75rem;">Student</th>
+          <th style="padding:0.75rem;">Joined</th>
+          <th style="padding:0.75rem;">Status</th>
+          <th style="padding:0.75rem;">Score</th>
+        </tr>
+      </thead>
+      <tbody id="attendance-body">
+        {% for a in attempts %}
+        <tr>
+          <td style="padding:0.75rem;">{{ a.user_name }}</td>
+          <td style="padding:0.75rem;">{{ a.joined_at[11:16] if a.joined_at else '—' }}</td>
+          <td style="padding:0.75rem;">
+            {% if a.status == 'in_progress' %}
+              <span style="color:var(--primary);font-weight:600;">● In Progress</span>
+            {% elif a.status == 'submitted' %}
+              <span style="color:var(--success);font-weight:600;">✓ Submitted</span>
+            {% else %}
+              <span style="color:var(--danger);font-weight:600;">✗ Disqualified</span>
+            {% endif %}
+          </td>
+          <td style="padding:0.75rem;">{% if a.status == 'submitted' %}{{ a.score }}/{{ a.total }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not attempts %}
+    <p style="color:var(--gray-500);text-align:center;padding:2rem;">No students have joined yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div style="margin-top:1.5rem;">
+  <form method="POST" action="{{ url_for('delete_exam', exam_id=exam.id) }}" onsubmit="return confirm('Delete this exam permanently? This cannot be undone.');">
+    <button type="submit" class="btn btn-outline" style="color:var(--danger);border-color:var(--danger);">
+      <i class="fas fa-trash"></i> Delete Exam
+    </button>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// Poll every 4 seconds for live attendance updates — no websocket infra needed for this scale.
+function refreshAttendance() {
+  fetch("{{ url_for('exam_attempts_json', exam_id=exam.id) }}")
+    .then(res => res.json())
+    .then(data => {
+      document.getElementById("count-progress").textContent = data.counts.in_progress;
+      document.getElementById("count-submitted").textContent = data.counts.submitted;
+      document.getElementById("count-disqualified").textContent = data.counts.disqualified;
+
+      const body = document.getElementById("attendance-body");
+      if (data.attempts.length === 0) {
+        body.innerHTML = "";
+        return;
+      }
+      body.innerHTML = data.attempts.map(a => {
+        let statusHtml = "";
+        if (a.status === "in_progress") statusHtml = '<span style="color:var(--primary);font-weight:600;">● In Progress</span>';
+        else if (a.status === "submitted") statusHtml = '<span style="color:var(--success);font-weight:600;">✓ Submitted</span>';
+        else statusHtml = '<span style="color:var(--danger);font-weight:600;">✗ Disqualified</span>';
+        const joined = a.joined_at ? a.joined_at.substring(11, 16) : "—";
+        const score = a.status === "submitted" ? `${a.score}/${a.total}` : "—";
+        return `<tr><td style="padding:0.75rem;">${a.user_name}</td><td style="padding:0.75rem;">${joined}</td><td style="padding:0.75rem;">${statusHtml}</td><td style="padding:0.75rem;">${score}</td></tr>`;
+      }).join("");
+    })
+    .catch(() => {});
+}
+setInterval(refreshAttendance, 4000);
+</script>
+{% endblock %}

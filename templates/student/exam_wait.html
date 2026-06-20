@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Waiting — {{ exam.title }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:500px;margin:3rem auto;text-align:center;">
+  <div class="card-body" style="padding:3rem;">
+    <i class="fas fa-hourglass-half" style="font-size:3rem;color:var(--accent);margin-bottom:1rem;display:block;"></i>
+    <h2 style="font-family:var(--font-display);margin-bottom:0.5rem;">{{ exam.title }}</h2>
+    <p style="color:var(--gray-500);margin-bottom:1.5rem;">This exam hasn't started yet.</p>
+    <div style="font-size:2.2rem;font-weight:700;color:var(--primary);margin-bottom:1rem;" id="countdown">--:--:--</div>
+    <p style="color:var(--gray-500);font-size:0.9rem;">
+      This page will automatically refresh once the exam goes live. Stay on this page.
+    </p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const startTime = new Date("{{ exam.start_time }}Z".replace("ZZ","Z")).getTime() || Date.parse("{{ exam.start_time }}");
+function tick() {
+  const now = Date.now();
+  // The exam start_time stored has no 'Z' suffix when naive; treat as local server time for simplicity.
+  const target = Date.parse("{{ exam.start_time }}");
+  const diff = target - now;
+  if (diff <= 0) {
+    location.reload();
+    return;
+  }
+  const h = Math.floor(diff / 3600000).toString().padStart(2,"0");
+  const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2,"0");
+  const s = Math.floor((diff % 60000) / 1000).toString().padStart(2,"0");
+  document.getElementById("countdown").textContent = `${h}:${m}:${s}`;
+}
+tick();
+setInterval(tick, 1000);
+// Safety net in case the client clock drifts — re-check with the server periodically.
+setInterval(() => location.reload(), 30000);
+</script>
+{% endblock %}

@@ -40,7 +40,8 @@
 
   <!-- Quick Actions -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:2rem;">
-    <a href="{{ url_for('quiz') }}" class="btn btn-primary btn-lg"><i class="fas fa-pen"></i> Start Mock Test</a>
+    <a href="{{ url_for('list_exams_student') }}" class="btn btn-primary btn-lg"><i class="fas fa-clock"></i> Timed Exams</a>
+    <a href="{{ url_for('quiz') }}" class="btn btn-outline btn-lg"><i class="fas fa-pen"></i> Practice Quiz</a>
     <a href="{{ url_for('chatbot') }}" class="btn btn-outline btn-lg"><i class="fas fa-robot"></i> AI Doubt Solver</a>
     <a href="{{ url_for('notes') }}" class="btn btn-outline btn-lg"><i class="fas fa-book"></i> Study Notes</a>
     <a href="{{ url_for('leaderboard') }}" class="btn btn-outline btn-lg"><i class="fas fa-trophy"></i> Leaderboard</a>

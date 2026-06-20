@@ -19,13 +19,15 @@
     {% if session.get('user_id') %}
       {% if session.get('role') == 'admin' %}
         <a href="{{ url_for('admin_dashboard') }}"><i class="fas fa-gauge"></i> Dashboard</a>
+        <a href="{{ url_for('list_exams') }}"><i class="fas fa-clock"></i> Exams</a>
         <a href="{{ url_for('add_question') }}"><i class="fas fa-plus"></i> Add Q</a>
         <a href="{{ url_for('upload_notes') }}"><i class="fas fa-upload"></i> Upload</a>
         <a href="{{ url_for('generate_ai_questions') }}"><i class="fas fa-robot"></i> AI Generate</a>
         <a href="{{ url_for('manage_users') }}"><i class="fas fa-users"></i> Users</a>
       {% else %}
         <a href="{{ url_for('student_dashboard') }}"><i class="fas fa-house"></i> Home</a>
-        <a href="{{ url_for('quiz') }}"><i class="fas fa-pen"></i> Mock Test</a>
+        <a href="{{ url_for('quiz') }}"><i class="fas fa-pen"></i> Practice</a>
+        <a href="{{ url_for('list_exams_student') }}"><i class="fas fa-clock"></i> Timed Exams</a>
         <a href="{{ url_for('notes') }}"><i class="fas fa-book"></i> Notes</a>
         <a href="{{ url_for('chatbot') }}"><i class="fas fa-robot"></i> AI Chat</a>
         <a href="{{ url_for('leaderboard') }}"><i class="fas fa-trophy"></i> Leaderboard</a>

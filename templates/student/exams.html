@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Timed Exams — PSC Trainer{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1><i class="fas fa-clock"></i> Timed Exams</h1>
+  <p>Official scheduled mock tests — once started, you can't pause or leave.</p>
+</div>
+
+{% if exams %}
+  <div style="display:grid;gap:1rem;">
+    {% for e in exams %}
+    <div class="card">
+      <div class="card-body" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">
+        <div>
+          <h3 style="font-family:var(--font-display);">{{ e.title }}</h3>
+          <p style="color:var(--gray-500);margin-top:0.3rem;">
+            {{ e.subject }} &nbsp;•&nbsp; {{ e.question_ids|length }} questions &nbsp;•&nbsp; {{ e.duration_minutes }} min
+          </p>
+          <p style="color:var(--gray-500);font-size:0.85rem;margin-top:0.2rem;">
+            Starts: {{ e.start_time[:16].replace('T', ' ') }}
+          </p>
+        </div>
+        <div>
+          {% if e.computed_status == 'live' %}
+            <a href="{{ url_for('enter_exam', exam_id=e.id) }}" class="btn btn-primary">
+              <i class="fas fa-play"></i> Enter Now
+            </a>
+          {% elif e.computed_status == 'scheduled' %}
+            <a href="{{ url_for('enter_exam', exam_id=e.id) }}" class="btn btn-outline">
+              <i class="fas fa-hourglass-half"></i> Not Started
+            </a>
+          {% else %}
+            <a href="{{ url_for('enter_exam', exam_id=e.id) }}" class="btn btn-outline" style="color:var(--gray-500);border-color:var(--gray-300);">
+              <i class="fas fa-flag-checkered"></i> Ended
+            </a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <div class="card-body" style="text-align:center;padding:3rem;">
+      <i class="fas fa-clock" style="font-size:2.5rem;color:var(--accent);margin-bottom:1rem;display:block;"></i>
+      <h3>No timed exams scheduled yet</h3>
+      <p style="color:var(--gray-500);margin-top:0.5rem;">Check back later, or try Practice mode in the meantime.</p>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

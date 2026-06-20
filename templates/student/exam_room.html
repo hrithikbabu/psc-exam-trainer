@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ exam.title }} — In Progress{% endblock %}
+{% block content %}
+<div class="quiz-container" id="quiz-area">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+    <span><strong>{{ exam.title }}</strong> &nbsp;•&nbsp; {{ questions|length }} Questions</span>
+    <span class="timer" id="timer">--:--</span>
+  </div>
+
+  <div class="alert alert-info" style="margin-bottom:1.5rem;">
+    <i class="fas fa-triangle-exclamation"></i>
+    Do not switch tabs, minimize, or close this window — doing so will end your attempt and disqualify you. Right-click and copy/paste are also disabled.
+  </div>
+
+  {% for q in questions %}
+  <div class="question-card" style="margin-bottom:1.5rem;">
+    <p class="question-text">{{ loop.index }}. {{ q.question }}</p>
+    <div class="options">
+      {% for opt_key, opt_label in [('A', q.option_a), ('B', q.option_b), ('C', q.option_c), ('D', q.option_d)] %}
+      <button class="option-btn" data-qid="{{ q.id }}" data-option="{{ opt_key }}" type="button">
+        {{ opt_key }}. {{ opt_label }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div style="text-align:center;margin-top:2rem;">
+    <button onclick="submitExam(false)" class="btn btn-primary btn-lg">
+      <i class="fas fa-check"></i> Submit Exam
+    </button>
+  </div>
+</div>
+
+<!-- Disqualification overlay -->
+<div id="dq-overlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.95);z-index:9999;align-items:center;justify-content:center;">
+  <div style="text-align:center;color:white;padding:2rem;">
+    <i class="fas fa-ban" style="font-size:3rem;color:var(--danger);margin-bottom:1rem;display:block;"></i>
+    <h2>You have been disqualified</h2>
+    <p style="margin-top:0.5rem;color:#CBD5E1;">Leaving the exam screen or attempting to bypass restrictions ends your attempt.</p>
+    <a href="{{ url_for('list_exams_student') }}" class="btn btn-outline" style="margin-top:1.5rem;color:white;border-color:white;">Back to Exams</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const EXAM_ID = "{{ exam.id }}";
+const ATTEMPT_ID = "{{ attempt_id }}";
+let SECONDS_LEFT = {{ seconds_left }};
+let disqualified = false;
+let submitted = false;
+
+function showDisqualified() {
+  if (disqualified) return;
+  disqualified = true;
+  document.getElementById("dq-overlay").style.display = "flex";
+}
+
+function reportViolation(reason) {
+  if (disqualified || submitted) return;
+  // Best-effort beacon so it fires even if the page is closing.
+  const payload = JSON.stringify({ attempt_id: ATTEMPT_ID, violation: reason });
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon("{{ url_for('exam_heartbeat', exam_id=exam.id) }}",
+      new Blob([payload], { type: "application/json" }));
+  } else {
+    fetch("{{ url_for('exam_heartbeat', exam_id=exam.id) }}", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true
+    });
+  }
+  showDisqualified();
+}
+
+// ── Anti-cheat: tab switch / minimize ──────────────────────
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) reportViolation("tab_switch_or_minimize");
+});
+
+// ── Anti-cheat: window loses focus (alt-tab, clicking outside) ──
+window.addEventListener("blur", () => reportViolation("window_blur"));
+
+// ── Anti-cheat: closing/refreshing the tab ─────────────────
+window.addEventListener("beforeunload", (e) => {
+  if (!submitted && !disqualified) {
+    reportViolation("page_close_or_refresh");
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+// ── Anti-cheat: right-click disabled ───────────────────────
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// ── Anti-cheat: copy/paste/cut disabled ────────────────────
+["copy", "paste", "cut"].forEach(evt =>
+  document.addEventListener(evt, (e) => e.preventDefault())
+);
+
+// ── Anti-cheat: common devtools / view-source shortcuts ────
+document.addEventListener("keydown", (e) => {
+  const blocked =
+    e.key === "F12" ||
+    (e.ctrlKey && e.shiftKey && ["I", "J", "C"].includes(e.key.toUpperCase())) ||
+    (e.ctrlKey && e.key.toUpperCase() === "U");
+  if (blocked) {
+    e.preventDefault();
+    reportViolation("devtools_attempt");
+  }
+});
+
+// ── Server-synced countdown timer ──────────────────────────
+function tick() {
+  if (disqualified || submitted) return;
+  SECONDS_LEFT--;
+  const mins = Math.floor(SECONDS_LEFT / 60).toString().padStart(2, "0");
+  const secs = (SECONDS_LEFT % 60).toString().padStart(2, "0");
+  document.getElementById("timer").textContent = `${mins}:${secs}`;
+  if (SECONDS_LEFT <= 60) document.getElementById("timer").classList.add("urgent");
+  if (SECONDS_LEFT <= 0) {
+    submitExam(true);
+  }
+}
+setInterval(tick, 1000);
+tick();
+
+// ── Periodic heartbeat — keeps attempt alive, catches stale disqualification ──
+setInterval(() => {
+  if (disqualified || submitted) return;
+  fetch("{{ url_for('exam_heartbeat', exam_id=exam.id) }}", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attempt_id: ATTEMPT_ID })
+  }).then(res => res.json()).then(data => {
+    if (data.status === "disqualified") showDisqualified();
+  }).catch(() => {});
+}, 10000);
+
+// ── Option select (reuses existing app-wide click handler in script.js) ──
+
+// ── Submit ──────────────────────────────────────────────────
+function submitExam(auto) {
+  if (submitted || disqualified) return;
+  submitted = true;
+  const answers = {};
+  document.querySelectorAll(".option-btn.selected").forEach(btn => {
+    answers[btn.dataset.qid] = btn.dataset.option;
+  });
+  document.getElementById("quiz-area").innerHTML = `
+    <div class="card" style="max-width:400px;margin:2rem auto;text-align:center;">
+      <div class="card-body" style="padding:3rem;">
+        <i class="fas fa-spinner fa-spin" style="font-size:2.5rem;color:var(--primary);margin-bottom:1rem;display:block;"></i>
+        <p>Submitting and evaluating your answers...</p>
+      </div>
+    </div>`;
+  fetch("{{ url_for('submit_exam', exam_id=exam.id) }}", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attempt_id: ATTEMPT_ID, answers })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.redirect) window.location.href = data.redirect;
+  })
+  .catch(() => {
+    document.getElementById("quiz-area").innerHTML =
+      '<div class="alert alert-error">Submission failed. Please check your connection and try again.</div>';
+    submitted = false;
+  });
+}
+</script>
+{% endblock %}

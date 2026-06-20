@@ -7,6 +7,7 @@ from groq import Groq
 import PyPDF2
 import requests
 import json
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -37,14 +38,22 @@ def firestore_get(collection, doc_id):
     return None
 
 def firestore_set(collection, doc_id, data):
+    """Partial update — merges the given fields into the existing document instead of
+    replacing it. Without updateMask, Firestore's PATCH endpoint wipes every field not
+    included in this call, which would silently delete data on every status update."""
     url = f"{FIRESTORE_URL}/{collection}/{doc_id}"
+    mask_params = "&".join(f"updateMask.fieldPaths={k}" for k in data.keys())
+    url = f"{url}?{mask_params}"
     body = {"fields": to_firestore(data)}
     requests.patch(url, json=body)
 
 def firestore_add(collection, data):
     url = f"{FIRESTORE_URL}/{collection}"
     body = {"fields": to_firestore(data)}
-    requests.post(url, json=body)
+    res = requests.post(url, json=body)
+    if res.status_code == 200:
+        return res.json()["name"].split("/")[-1]
+    return None
 
 def firestore_list(collection, limit=100):
     url = f"{FIRESTORE_URL}/{collection}?pageSize={limit}"
@@ -59,35 +68,91 @@ def firestore_list(collection, limit=100):
         return result
     return []
 
+def firestore_query(collection, field, op, value, limit=200):
+    """Query a collection by a single field using Firestore's structured query API.
+    op is one of: EQUAL, LESS_THAN, GREATER_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL."""
+    url = f"{FIRESTORE_URL}:runQuery"
+    if isinstance(value, bool):
+        value_obj = {"booleanValue": value}
+    elif isinstance(value, int):
+        value_obj = {"integerValue": str(value)}
+    else:
+        value_obj = {"stringValue": str(value)}
+    body = {
+        "structuredQuery": {
+            "from": [{"collectionId": collection}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": field},
+                    "op": op,
+                    "value": value_obj
+                }
+            },
+            "limit": limit
+        }
+    }
+    res = requests.post(url, json=body)
+    result = []
+    if res.status_code == 200:
+        for entry in res.json():
+            doc = entry.get("document")
+            if not doc:
+                continue
+            d = parse_firestore(doc)
+            d["id"] = doc["name"].split("/")[-1]
+            result.append(d)
+    return result
+
+def firestore_delete(collection, doc_id):
+    url = f"{FIRESTORE_URL}/{collection}/{doc_id}"
+    requests.delete(url)
+
 def to_firestore(data):
     fields = {}
     for k, v in data.items():
-        if isinstance(v, str):
-            fields[k] = {"stringValue": v}
-        elif isinstance(v, int):
-            fields[k] = {"integerValue": str(v)}
-        elif isinstance(v, float):
-            fields[k] = {"doubleValue": v}
-        elif isinstance(v, bool):
-            fields[k] = {"booleanValue": v}
-        elif isinstance(v, list):
-            fields[k] = {"arrayValue": {"values": [{"stringValue": str(i)} for i in v]}}
+        fields[k] = _to_firestore_value(v)
     return fields
+
+def _to_firestore_value(v):
+    if isinstance(v, bool):
+        return {"booleanValue": v}
+    elif isinstance(v, str):
+        return {"stringValue": v}
+    elif isinstance(v, int):
+        return {"integerValue": str(v)}
+    elif isinstance(v, float):
+        return {"doubleValue": v}
+    elif isinstance(v, list):
+        return {"arrayValue": {"values": [_to_firestore_value(i) for i in v]}}
+    elif isinstance(v, dict):
+        return {"mapValue": {"fields": {k2: _to_firestore_value(v2) for k2, v2 in v.items()}}}
+    elif v is None:
+        return {"nullValue": None}
+    else:
+        return {"stringValue": str(v)}
 
 def parse_firestore(doc):
     result = {}
     for k, v in doc.get("fields", {}).items():
-        if "stringValue" in v:
-            result[k] = v["stringValue"]
-        elif "integerValue" in v:
-            result[k] = int(v["integerValue"])
-        elif "doubleValue" in v:
-            result[k] = v["doubleValue"]
-        elif "booleanValue" in v:
-            result[k] = v["booleanValue"]
-        elif "arrayValue" in v:
-            result[k] = [i.get("stringValue", "") for i in v["arrayValue"].get("values", [])]
+        result[k] = _parse_firestore_value(v)
     return result
+
+def _parse_firestore_value(v):
+    if "stringValue" in v:
+        return v["stringValue"]
+    elif "integerValue" in v:
+        return int(v["integerValue"])
+    elif "doubleValue" in v:
+        return v["doubleValue"]
+    elif "booleanValue" in v:
+        return v["booleanValue"]
+    elif "arrayValue" in v:
+        return [_parse_firestore_value(i) for i in v["arrayValue"].get("values", [])]
+    elif "mapValue" in v:
+        return {k2: _parse_firestore_value(v2) for k2, v2 in v["mapValue"].get("fields", {}).items()}
+    elif "nullValue" in v:
+        return None
+    return None
 
 # ── Firebase Auth REST ────────────────────────────────────
 def firebase_register(email, password, name):
@@ -289,6 +354,202 @@ Give: 1) Most repeated topics 2) Important subjects 3) Question patterns 4) Pred
     return jsonify({"analysis": analysis})
 
 # ══════════════════════════════════════════════════════════
+# STUDENT — TIMED EXAM SYSTEM
+# ══════════════════════════════════════════════════════════
+
+def _exam_status(exam):
+    """Returns 'scheduled', 'live', or 'ended' based on server clock vs stored start_time + duration."""
+    now = datetime.now(timezone.utc).timestamp()
+    try:
+        start = datetime.fromisoformat(exam.get("start_time", "")).timestamp()
+    except ValueError:
+        return "ended"
+    end = start + exam.get("duration_minutes", 0) * 60
+    if now < start:
+        return "scheduled"
+    elif now < end:
+        return "live"
+    return "ended"
+
+def _exam_seconds_left(exam):
+    now = datetime.now(timezone.utc).timestamp()
+    start = datetime.fromisoformat(exam["start_time"]).timestamp()
+    end = start + exam.get("duration_minutes", 0) * 60
+    return max(0, int(end - now))
+
+@app.route("/student/exams")
+def list_exams_student():
+    if not is_logged_in():
+        return redirect(url_for("login"))
+    exams = firestore_list("exams")
+    for e in exams:
+        e["computed_status"] = _exam_status(e)
+    exams.sort(key=lambda x: x.get("start_time", ""))
+    return render_template("student/exams.html", exams=exams)
+
+@app.route("/student/exams/<exam_id>/enter")
+def enter_exam(exam_id):
+    if not is_logged_in():
+        return redirect(url_for("login"))
+    exam = firestore_get("exams", exam_id)
+    if not exam:
+        return redirect(url_for("list_exams_student"))
+    exam["id"] = exam_id
+    status = _exam_status(exam)
+
+    if status == "scheduled":
+        return render_template("student/exam_wait.html", exam=exam)
+    if status == "ended":
+        return render_template("student/exam_ended.html", exam=exam)
+
+    # Live — check for an existing attempt (prevents re-entry after disqualification/submission)
+    existing = firestore_query("exam_attempts", "exam_id", "EQUAL", exam_id)
+    my_attempt = next((a for a in existing if a.get("user_id") == session["user_id"]), None)
+
+    if my_attempt:
+        if my_attempt.get("status") == "disqualified":
+            return render_template("student/exam_blocked.html", exam=exam,
+                reason="You were disqualified from this exam for leaving the test screen or attempting to cheat. You cannot re-enter.")
+        if my_attempt.get("status") == "submitted":
+            return redirect(url_for("exam_result", exam_id=exam_id))
+        attempt_id = my_attempt["id"]
+    else:
+        attempt_id = firestore_add("exam_attempts", {
+            "exam_id": exam_id,
+            "user_id": session["user_id"],
+            "user_name": session.get("user_name", "Student"),
+            "status": "in_progress",
+            "joined_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    questions = []
+    for qid in exam.get("question_ids", []):
+        q = firestore_get("questions", qid)
+        if q:
+            q["id"] = qid
+            questions.append(q)
+
+    seconds_left = _exam_seconds_left(exam)
+    return render_template("student/exam_room.html", exam=exam, questions=questions,
+        attempt_id=attempt_id, seconds_left=seconds_left)
+
+@app.route("/student/exams/<exam_id>/heartbeat", methods=["POST"])
+def exam_heartbeat(exam_id):
+    """Called periodically and on suspicious client events (tab switch, blur, devtools,
+    right-click, copy/paste, page close) by exam_room.html's anti-cheat JS.
+    A 'violation' payload immediately disqualifies the attempt."""
+    if not is_logged_in():
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json(silent=True) or {}
+    attempt_id = data.get("attempt_id")
+    violation  = data.get("violation")
+    if not attempt_id:
+        return jsonify({"error": "Missing attempt_id"}), 400
+
+    attempt = firestore_get("exam_attempts", attempt_id)
+    if not attempt or attempt.get("user_id") != session["user_id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    if attempt.get("status") != "in_progress":
+        return jsonify({"status": attempt.get("status")})
+
+    if violation:
+        firestore_set("exam_attempts", attempt_id, {
+            "status": "disqualified",
+            "disqualified_reason": violation,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        })
+        return jsonify({"status": "disqualified"})
+
+    return jsonify({"status": "ok"})
+
+@app.route("/student/exams/<exam_id>/submit", methods=["POST"])
+def submit_exam(exam_id):
+    if not is_logged_in():
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json(silent=True) or {}
+    attempt_id = data.get("attempt_id")
+    answers    = data.get("answers", {})
+
+    attempt = firestore_get("exam_attempts", attempt_id)
+    if not attempt or attempt.get("user_id") != session["user_id"]:
+        return jsonify({"error": "Not authorized"}), 403
+    if attempt.get("status") != "in_progress":
+        return jsonify({"status": attempt.get("status")})
+
+    exam = firestore_get("exams", exam_id) or {}
+    score = 0
+    total = len(exam.get("question_ids", []))
+    breakdown = {}
+
+    for qid in exam.get("question_ids", []):
+        q = firestore_get("questions", qid)
+        if not q:
+            continue
+        selected = answers.get(qid, "")
+        correct  = q.get("answer", "")
+        is_correct = selected == correct
+        if is_correct:
+            score += 1
+        breakdown[qid] = {
+            "question": q.get("question", ""),
+            "selected": selected,
+            "correct_answer": correct,
+            "is_correct": is_correct,
+        }
+
+    # AI evaluation pass — a short written summary of performance, not per-question grading
+    # (grading itself is exact-match above; this is the "AI evaluates" feel you asked for).
+    summary_prompt = f"""A Kerala PSC student just completed a mock test titled "{exam.get('title','')}" on subject "{exam.get('subject','')}".
+They scored {score} out of {total}.
+Write a short (3-4 sentence) encouraging but honest evaluation of this performance, and one specific tip for improvement."""
+    ai_feedback = ask_ai(summary_prompt, system="You are a supportive but honest Kerala PSC exam coach.")
+
+    firestore_set("exam_attempts", attempt_id, {
+        "status": "submitted",
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "answers": answers,
+        "score": score,
+        "total": total,
+        "ai_feedback": ai_feedback,
+    })
+
+    # Also feed the leaderboard/score system used elsewhere in the app
+    firestore_add("results", {"user_id": session["user_id"], "score": score, "total": total})
+
+    return jsonify({"status": "submitted", "redirect": url_for("exam_result", exam_id=exam_id)})
+
+@app.route("/student/exams/<exam_id>/result")
+def exam_result(exam_id):
+    if not is_logged_in():
+        return redirect(url_for("login"))
+    exam = firestore_get("exams", exam_id)
+    if not exam:
+        return redirect(url_for("list_exams_student"))
+    exam["id"] = exam_id
+
+    attempts = firestore_query("exam_attempts", "exam_id", "EQUAL", exam_id)
+    my_attempt = next((a for a in attempts if a.get("user_id") == session["user_id"]), None)
+    if not my_attempt or my_attempt.get("status") != "submitted":
+        return redirect(url_for("list_exams_student"))
+
+    breakdown = []
+    for qid in exam.get("question_ids", []):
+        q = firestore_get("questions", qid)
+        if not q:
+            continue
+        selected = my_attempt.get("answers", {}).get(qid, "")
+        breakdown.append({
+            "question": q.get("question", ""),
+            "option_a": q.get("option_a", ""), "option_b": q.get("option_b", ""),
+            "option_c": q.get("option_c", ""), "option_d": q.get("option_d", ""),
+            "selected": selected,
+            "correct_answer": q.get("answer", ""),
+            "is_correct": selected == q.get("answer", ""),
+        })
+
+    return render_template("student/exam_result.html", exam=exam, attempt=my_attempt, breakdown=breakdown)
+
+# ══════════════════════════════════════════════════════════
 # ADMIN ROUTES
 # ══════════════════════════════════════════════════════════
 
@@ -370,6 +631,144 @@ def manage_users():
         return redirect(url_for("login"))
     users = firestore_list("users")
     return render_template("admin/users.html", users=users)
+
+# ══════════════════════════════════════════════════════════
+# ADMIN — TIMED EXAM SYSTEM
+# ══════════════════════════════════════════════════════════
+
+@app.route("/admin/exams")
+def list_exams():
+    if not is_admin():
+        return redirect(url_for("login"))
+    exams = firestore_list("exams")
+    now = datetime.now(timezone.utc)
+    for e in exams:
+        try:
+            start = datetime.fromisoformat(e.get("start_time", ""))
+        except ValueError:
+            start = now
+        end = start.timestamp() + e.get("duration_minutes", 0) * 60
+        if now.timestamp() >= end:
+            e["computed_status"] = "ended"
+        elif now.timestamp() >= start.timestamp():
+            e["computed_status"] = "live"
+        else:
+            e["computed_status"] = "scheduled"
+    exams.sort(key=lambda x: x.get("start_time", ""), reverse=True)
+    return render_template("admin/exams.html", exams=exams)
+
+@app.route("/admin/exams/create", methods=["GET", "POST"])
+def create_exam():
+    if not is_admin():
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        title       = request.form.get("title", "").strip()
+        subject     = request.form.get("subject", "").strip()
+        difficulty  = request.form.get("difficulty", "medium")
+        duration    = int(request.form.get("duration_minutes", 30))
+        start_time  = request.form.get("start_time", "")  # datetime-local input, e.g. 2026-06-20T14:30
+        question_source = request.form.get("question_source", "bank")
+        count       = int(request.form.get("count", 10))
+
+        try:
+            # datetime-local has no timezone; treat it as the server's local clock (IST in practice).
+            start_dt = datetime.fromisoformat(start_time)
+        except ValueError:
+            return render_template("admin/create_exam.html", error="Invalid start time.")
+
+        question_ids = []
+        if question_source == "ai":
+            prompt = f"""Generate {count} Kerala PSC MCQ questions on '{subject}' at '{difficulty}' difficulty.
+Return ONLY a JSON array:
+[{{"question":"...","option_a":"...","option_b":"...","option_c":"...","option_d":"...","answer":"A","subject":"{subject}","difficulty":"{difficulty}"}}]"""
+            raw = ask_ai(prompt, system="You are a Kerala PSC question paper setter. Return only valid JSON array.")
+            try:
+                start = raw.index("[")
+                end   = raw.rindex("]") + 1
+                questions = json.loads(raw[start:end])
+                for q in questions:
+                    qid = firestore_add("questions", q)
+                    if qid:
+                        question_ids.append(qid)
+            except Exception as e:
+                return render_template("admin/create_exam.html", error=f"AI question generation failed: {e}")
+        else:
+            bank = firestore_list("questions", limit=200)
+            if subject:
+                bank = [q for q in bank if q.get("subject", "").lower() == subject.lower()]
+            question_ids = [q["id"] for q in bank[:count]]
+
+        if not question_ids:
+            return render_template("admin/create_exam.html",
+                error="No questions available — try AI generation or add questions to the bank first.")
+
+        exam_id = firestore_add("exams", {
+            "title": title,
+            "subject": subject,
+            "difficulty": difficulty,
+            "duration_minutes": duration,
+            "start_time": start_dt.isoformat(),
+            "question_ids": question_ids,
+            "created_by": session["user_name"],
+        })
+        return redirect(url_for("exam_live_view", exam_id=exam_id))
+    return render_template("admin/create_exam.html")
+
+@app.route("/admin/exams/<exam_id>")
+def exam_live_view(exam_id):
+    if not is_admin():
+        return redirect(url_for("login"))
+    exam = firestore_get("exams", exam_id)
+    if not exam:
+        return redirect(url_for("list_exams"))
+    exam["id"] = exam_id
+    attempts = firestore_query("exam_attempts", "exam_id", "EQUAL", exam_id)
+    attempts.sort(key=lambda a: a.get("joined_at", ""))
+    counts = {
+        "in_progress": sum(1 for a in attempts if a.get("status") == "in_progress"),
+        "submitted":   sum(1 for a in attempts if a.get("status") == "submitted"),
+        "disqualified": sum(1 for a in attempts if a.get("status") == "disqualified"),
+    }
+    return render_template("admin/exam_live.html", exam=exam, attempts=attempts, counts=counts)
+
+@app.route("/admin/exams/<exam_id>/attempts.json")
+def exam_attempts_json(exam_id):
+    """Polled by the admin live view to refresh attendance without a full page reload."""
+    if not is_admin():
+        return jsonify({"error": "Not authorized"}), 403
+    attempts = firestore_query("exam_attempts", "exam_id", "EQUAL", exam_id)
+    attempts.sort(key=lambda a: a.get("joined_at", ""))
+    counts = {
+        "in_progress": sum(1 for a in attempts if a.get("status") == "in_progress"),
+        "submitted":   sum(1 for a in attempts if a.get("status") == "submitted"),
+        "disqualified": sum(1 for a in attempts if a.get("status") == "disqualified"),
+    }
+    return jsonify({"attempts": attempts, "counts": counts})
+
+@app.route("/admin/exams/<exam_id>/edit_time", methods=["POST"])
+def edit_exam_time(exam_id):
+    if not is_admin():
+        return jsonify({"error": "Not authorized"}), 403
+    start_time = request.form.get("start_time", "")
+    duration   = request.form.get("duration_minutes", "")
+    updates = {}
+    if start_time:
+        try:
+            updates["start_time"] = datetime.fromisoformat(start_time).isoformat()
+        except ValueError:
+            return jsonify({"error": "Invalid start time"}), 400
+    if duration:
+        updates["duration_minutes"] = int(duration)
+    if updates:
+        firestore_set("exams", exam_id, updates)
+    return redirect(url_for("exam_live_view", exam_id=exam_id))
+
+@app.route("/admin/exams/<exam_id>/delete", methods=["POST"])
+def delete_exam(exam_id):
+    if not is_admin():
+        return redirect(url_for("login"))
+    firestore_delete("exams", exam_id)
+    return redirect(url_for("list_exams"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

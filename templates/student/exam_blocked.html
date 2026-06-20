@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Access Blocked — {{ exam.title }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:500px;margin:3rem auto;text-align:center;">
+  <div class="card-body" style="padding:3rem;">
+    <i class="fas fa-ban" style="font-size:3rem;color:var(--danger);margin-bottom:1rem;display:block;"></i>
+    <h2 style="font-family:var(--font-display);margin-bottom:0.5rem;">Access Blocked</h2>
+    <p style="color:var(--gray-700);margin-bottom:1.5rem;">{{ reason }}</p>
+    <a href="{{ url_for('list_exams_student') }}" class="btn btn-outline">Back to Exams</a>
+  </div>
+</div>
+{% endblock %}
