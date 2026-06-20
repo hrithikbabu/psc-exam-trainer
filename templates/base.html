@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{% block title %}PSC Exam Trainer{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"/>
+ <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;700&family=Spectral:ital,wght@0,500;0,600;0,700;1,500&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 </head>
 <body>
@@ -13,7 +13,7 @@
 <!-- Navbar -->
 <nav class="navbar">
   <a href="{{ url_for('index') }}" class="nav-brand">
-    <i class="fas fa-brain"></i> PSC Trainer
+    <i class="fas fa-stamp"></i> PSC Trainer
   </a>
   <div class="nav-links">
     {% if session.get('user_id') %}
