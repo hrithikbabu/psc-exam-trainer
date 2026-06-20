@@ -1,34 +1,94 @@
 {% extends "base.html" %}
-{% block title %}Admin Dashboard — PSC Trainer{% endblock %}
+{% block title %}Dashboard — PSC Trainer{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>🛡️ Admin Dashboard</h1>
-  <p>Manage your PSC Exam Trainer platform.</p>
+  <h1>👋 Welcome back, {{ user.name }}!</h1>
+  <p>Keep up your preparation — every question counts.</p>
 </div>
+
 <div class="dashboard">
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-card-icon icon-blue"><i class="fas fa-users"></i></div>
-      <div class="stat-card-info"><h3>{{ users }}</h3><p>Total Users</p></div>
+      <div class="stat-card-icon icon-blue"><i class="fas fa-star"></i></div>
+      <div class="stat-card-info">
+        <h3>{{ user.score or 0 }}</h3>
+        <p>Total Score</p>
+      </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-icon icon-green"><i class="fas fa-question-circle"></i></div>
-      <div class="stat-card-info"><h3>{{ questions }}</h3><p>Questions</p></div>
+      <div class="stat-card-icon icon-green"><i class="fas fa-fire"></i></div>
+      <div class="stat-card-info">
+        <h3>{{ user.streak or 0 }}</h3>
+        <p>Day Streak</p>
+      </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-icon icon-yellow"><i class="fas fa-file-pdf"></i></div>
-      <div class="stat-card-info"><h3>{{ notes }}</h3><p>Notes Uploaded</p></div>
+      <div class="stat-card-icon icon-yellow"><i class="fas fa-pen"></i></div>
+      <div class="stat-card-info">
+        <h3>Practice</h3>
+        <p>Take Mock Test</p>
+      </div>
     </div>
     <div class="stat-card">
-      <div class="stat-card-icon icon-cyan"><i class="fas fa-chart-bar"></i></div>
-      <div class="stat-card-info"><h3>{{ results }}</h3><p>Tests Taken</p></div>
+      <div class="stat-card-icon icon-cyan"><i class="fas fa-robot"></i></div>
+      <div class="stat-card-info">
+        <h3>AI Chat</h3>
+        <p>Ask a Doubt</p>
+      </div>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
-    <a href="{{ url_for('add_question') }}" class="btn btn-primary btn-lg"><i class="fas fa-plus"></i> Add Question</a>
-    <a href="{{ url_for('upload_notes') }}" class="btn btn-outline btn-lg"><i class="fas fa-upload"></i> Upload Notes</a>
-    <a href="{{ url_for('generate_ai_questions') }}" class="btn btn-outline btn-lg"><i class="fas fa-robot"></i> AI Generate</a>
-    <a href="{{ url_for('manage_users') }}" class="btn btn-outline btn-lg"><i class="fas fa-users"></i> Manage Users</a>
+
+  <!-- Quick Actions -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:2rem;">
+    <a href="{{ url_for('quiz') }}" class="btn btn-primary btn-lg"><i class="fas fa-pen"></i> Start Mock Test</a>
+    <a href="{{ url_for('chatbot') }}" class="btn btn-outline btn-lg"><i class="fas fa-robot"></i> AI Doubt Solver</a>
+    <a href="{{ url_for('notes') }}" class="btn btn-outline btn-lg"><i class="fas fa-book"></i> Study Notes</a>
+    <a href="{{ url_for('leaderboard') }}" class="btn btn-outline btn-lg"><i class="fas fa-trophy"></i> Leaderboard</a>
+  </div>
+
+  <!-- AI Answer Evaluator -->
+  <div class="card" style="margin-bottom:1.5rem;">
+    <div class="card-header">
+      <h3><i class="fas fa-pen-to-square"></i> AI Answer Evaluator</h3>
+    </div>
+    <div class="card-body">
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>PSC Question</label>
+        <textarea id="eval-question" rows="2" placeholder="Type or paste a PSC question here..."></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Your Answer</label>
+        <textarea id="eval-answer" rows="4" placeholder="Write your answer here..."></textarea>
+      </div>
+      <button onclick="evaluateAnswer()" class="btn btn-primary"><i class="fas fa-check"></i> Evaluate My Answer</button>
+      <div id="eval-result" style="margin-top:1rem;padding:1rem;background:var(--gray-100);border-radius:var(--radius);display:none;"></div>
+      <script>
+        document.querySelector('[onclick="evaluateAnswer()"]').addEventListener('click', () => {
+          document.getElementById('eval-result').style.display = 'block';
+        });
+      </script>
+    </div>
+  </div>
+
+  <!-- Past Paper Analyzer -->
+  <div class="card">
+    <div class="card-header">
+      <h3><i class="fas fa-file-magnifying-glass"></i> Previous Year Paper Analyzer</h3>
+    </div>
+    <div class="card-body">
+      <p style="color:var(--gray-500);margin-bottom:1rem;">Upload a Kerala PSC previous year question paper (PDF) and AI will analyze important topics and patterns.</p>
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Upload PDF</label>
+        <input type="file" id="paper-file" accept=".pdf"/>
+      </div>
+      <button onclick="analyzePaper()" class="btn btn-primary"><i class="fas fa-magnifying-glass"></i> Analyze Paper</button>
+      <div id="analysis-result" style="margin-top:1rem;padding:1rem;background:var(--gray-100);border-radius:var(--radius);display:none;"></div>
+      <script>
+        document.querySelector('[onclick="analyzePaper()"]').addEventListener('click', () => {
+          document.getElementById('analysis-result').style.display = 'block';
+        });
+      </script>
+    </div>
   </div>
 </div>
 {% endblock %}
