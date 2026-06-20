@@ -7,12 +7,25 @@ from groq import Groq
 import PyPDF2
 import requests
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "psc-trainer-secret-2026")
+
+@app.template_filter("ist")
+def format_ist(start_time_str):
+    """Displays a stored (UTC) start_time back in IST, since that's the timezone
+    everyone using this app is actually in. Handles old naive-format data too."""
+    try:
+        dt = datetime.fromisoformat(start_time_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+        ist = dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+        return ist.strftime("%d %b %Y, %I:%M %p")
+    except (ValueError, TypeError):
+        return start_time_str
 
 # ── Cloudinary Setup ──────────────────────────────────────
 cloudinary.config(
@@ -357,11 +370,22 @@ Give: 1) Most repeated topics 2) Important subjects 3) Question patterns 4) Pred
 # STUDENT — TIMED EXAM SYSTEM
 # ══════════════════════════════════════════════════════════
 
+def _parse_exam_start(start_time_str):
+    """Parses a stored start_time string into a UTC-aware datetime. Handles both the
+    correct new format (timezone-aware, e.g. '...+00:00') and older naive strings that
+    were saved before the IST-conversion fix — naive strings are assumed IST, same as
+    the create_exam form originally intended."""
+    dt = datetime.fromisoformat(start_time_str)
+    if dt.tzinfo is None:
+        IST_OFFSET = timedelta(hours=5, minutes=30)
+        dt = dt.replace(tzinfo=timezone(IST_OFFSET))
+    return dt.astimezone(timezone.utc)
+
 def _exam_status(exam):
     """Returns 'scheduled', 'live', or 'ended' based on server clock vs stored start_time + duration."""
     now = datetime.now(timezone.utc).timestamp()
     try:
-        start = datetime.fromisoformat(exam.get("start_time", "")).timestamp()
+        start = _parse_exam_start(exam.get("start_time", "")).timestamp()
     except ValueError:
         return "ended"
     end = start + exam.get("duration_minutes", 0) * 60
@@ -373,9 +397,15 @@ def _exam_status(exam):
 
 def _exam_seconds_left(exam):
     now = datetime.now(timezone.utc).timestamp()
-    start = datetime.fromisoformat(exam["start_time"]).timestamp()
+    start = _parse_exam_start(exam["start_time"]).timestamp()
     end = start + exam.get("duration_minutes", 0) * 60
     return max(0, int(end - now))
+
+def _exam_start_epoch_ms(exam):
+    """Unix epoch milliseconds — handed to client-side JS so the browser never has to
+    parse a date string itself. This sidesteps all cross-browser ISO-parsing quirks
+    (the '--:--:--' freeze bug) since `new Date(ms)` with a plain number always works."""
+    return int(_parse_exam_start(exam["start_time"]).timestamp() * 1000)
 
 @app.route("/student/exams")
 def list_exams_student():
@@ -398,7 +428,8 @@ def enter_exam(exam_id):
     status = _exam_status(exam)
 
     if status == "scheduled":
-        return render_template("student/exam_wait.html", exam=exam)
+        return render_template("student/exam_wait.html", exam=exam,
+            start_epoch_ms=_exam_start_epoch_ms(exam))
     if status == "ended":
         return render_template("student/exam_ended.html", exam=exam)
 
@@ -561,9 +592,44 @@ def admin_dashboard():
     questions = firestore_list("questions")
     notes     = firestore_list("notes")
     results   = firestore_list("results")
+
+    # ── Exam widget data ──────────────────────────────────────
+    all_exams = firestore_list("exams")
+    live_exams = []
+    upcoming_exams = []
+    for e in all_exams:
+        e["computed_status"] = _exam_status(e)
+        if e["computed_status"] == "live":
+            live_exams.append(e)
+        elif e["computed_status"] == "scheduled":
+            upcoming_exams.append(e)
+
+    # Attendee counts for live exams only (keeps this cheap — we don't query attempts
+    # for every exam ever created, just the ones currently in progress).
+    for e in live_exams:
+        attempts = firestore_query("exam_attempts", "exam_id", "EQUAL", e["id"])
+        e["live_count"] = sum(1 for a in attempts if a.get("status") == "in_progress")
+        e["submitted_count"] = sum(1 for a in attempts if a.get("status") == "submitted")
+
+    upcoming_exams.sort(key=lambda e: e.get("start_time", ""))
+    upcoming_exams = upcoming_exams[:5]
+
+    # Recent results — last 5 submitted exam attempts across all exams, newest first.
+    # firestore_list has no orderBy, so we pull a reasonable batch and sort client-side.
+    recent_attempts = firestore_list("exam_attempts", limit=50)
+    recent_attempts = [a for a in recent_attempts if a.get("status") == "submitted"]
+    recent_attempts.sort(key=lambda a: a.get("submitted_at", ""), reverse=True)
+    recent_attempts = recent_attempts[:5]
+    # Attach exam title to each for display
+    exam_titles = {e["id"]: e.get("title", "Untitled Exam") for e in all_exams}
+    for a in recent_attempts:
+        a["exam_title"] = exam_titles.get(a.get("exam_id"), "Unknown Exam")
+
     return render_template("admin/dashboard.html",
         users=len(users), questions=len(questions),
-        notes=len(notes), results=len(results))
+        notes=len(notes), results=len(results),
+        live_exams=live_exams, upcoming_exams=upcoming_exams,
+        recent_attempts=recent_attempts)
 
 @app.route("/admin/add_question", methods=["GET", "POST"])
 def add_question():
@@ -671,8 +737,14 @@ def create_exam():
         count       = int(request.form.get("count", 10))
 
         try:
-            # datetime-local has no timezone; treat it as the server's local clock (IST in practice).
-            start_dt = datetime.fromisoformat(start_time)
+            # datetime-local input has no timezone info. Kerala PSC students/admins are in
+            # IST (UTC+5:30), so we treat the typed value as IST and convert to true UTC
+            # before storing. Storing naive datetimes and comparing against timezone.utc
+            # was the bug — it silently assumed the typed time was already UTC, making
+            # exams start 5.5 hours later than intended.
+            IST_OFFSET = timedelta(hours=5, minutes=30)
+            naive_dt = datetime.fromisoformat(start_time)
+            start_dt = naive_dt.replace(tzinfo=timezone(IST_OFFSET)).astimezone(timezone.utc)
         except ValueError:
             return render_template("admin/create_exam.html", error="Invalid start time.")
 
@@ -754,7 +826,9 @@ def edit_exam_time(exam_id):
     updates = {}
     if start_time:
         try:
-            updates["start_time"] = datetime.fromisoformat(start_time).isoformat()
+            IST_OFFSET = timedelta(hours=5, minutes=30)
+            naive_dt = datetime.fromisoformat(start_time)
+            updates["start_time"] = naive_dt.replace(tzinfo=timezone(IST_OFFSET)).astimezone(timezone.utc).isoformat()
         except ValueError:
             return jsonify({"error": "Invalid start time"}), 400
     if duration:

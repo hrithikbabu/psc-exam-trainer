@@ -17,7 +17,7 @@
             {{ e.subject }} &nbsp;•&nbsp; {{ e.question_ids|length }} questions &nbsp;•&nbsp; {{ e.duration_minutes }} min
           </p>
           <p style="color:var(--gray-500);font-size:0.85rem;margin-top:0.2rem;">
-            Starts: {{ e.start_time[:16].replace('T', ' ') }}
+            Starts: {{ e.start_time|ist }} IST
           </p>
         </div>
         <div>

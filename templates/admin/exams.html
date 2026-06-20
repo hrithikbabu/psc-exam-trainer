@@ -32,7 +32,7 @@
           <tr style="border-bottom:1px solid var(--gray-300);">
             <td style="padding:0.75rem;font-weight:600;">{{ e.title }}</td>
             <td style="padding:0.75rem;">{{ e.subject }}</td>
-            <td style="padding:0.75rem;">{{ e.start_time[:16].replace('T', ' ') }}</td>
+            <td style="padding:0.75rem;">{{ e.start_time|ist }} IST</td>
             <td style="padding:0.75rem;">{{ e.duration_minutes }} min</td>
             <td style="padding:0.75rem;">{{ e.question_ids|length }}</td>
             <td style="padding:0.75rem;">

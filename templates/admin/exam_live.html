@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header">
   <h1><i class="fas fa-satellite-dish"></i> {{ exam.title }}</h1>
-  <p>{{ exam.subject }} &nbsp;•&nbsp; {{ exam.duration_minutes }} minutes &nbsp;•&nbsp; Starts {{ exam.start_time[:16].replace('T', ' ') }}</p>
+  <p>{{ exam.subject }} &nbsp;•&nbsp; {{ exam.duration_minutes }} minutes &nbsp;•&nbsp; Starts {{ exam.start_time|ist }} IST</p>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem;">
@@ -26,7 +26,7 @@
   <div class="card-body">
     <form method="POST" action="{{ url_for('edit_exam_time', exam_id=exam.id) }}" style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap;">
       <div>
-        <label style="display:block;font-size:0.85rem;color:var(--gray-500);margin-bottom:0.3rem;">New Start Time</label>
+        <label style="display:block;font-size:0.85rem;color:var(--gray-500);margin-bottom:0.3rem;">New Start Time (IST)</label>
         <input type="datetime-local" name="start_time" style="padding:0.6rem;border:1px solid var(--gray-300);border-radius:8px;">
       </div>
       <div>
