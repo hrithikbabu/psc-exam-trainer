@@ -136,3 +136,37 @@ function analyzePaper() {
     resultEl.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;">${data.analysis}</pre>`;
   });
 }
+
+// ── Global Scroll-Reveal ──────────────────────────────────
+// Adds a quick fade+rise entrance to cards/stat-cards/etc as they
+// scroll into view, on every page, without needing new HTML classes.
+document.addEventListener("DOMContentLoaded", () => {
+  const targets = document.querySelectorAll(
+    ".stat-card, .card, .feature-card, .note-card, .question-card, .file-card"
+  );
+  if (!("IntersectionObserver" in window) || !targets.length) return;
+
+  targets.forEach((el) => {
+    el.classList.add("reveal-ready");
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("reveal-visible");
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+
+  targets.forEach((el) => observer.observe(el));
+});
+
+// ── Confetti burst on a great score ───────────────────────
+// Call celebrate() from a result page when the score is high.
+function celebrate() {
+  if (typeof confetti !== "function") return;
+  const colors = ["#FFE65C", "#FF6FA6", "#7CF29C", "#5CDFFF", "#A6791F"];
+  confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, colors });
+  setTimeout(() => confetti({ particleCount: 60, spread: 100, origin: { y: 0.4 }, colors }), 250);
+}
