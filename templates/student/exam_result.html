@@ -1,54 +1,57 @@
 {% extends "base.html" %}
-{% block title %}Result — {{ exam.title }}{% endblock %}
+{% block title %}Exam Result — PSC Trainer{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1><i class="fas fa-flag-checkered"></i> {{ exam.title }} — Result</h1>
 </div>
-
-<div class="card" style="max-width:500px;margin:0 auto 2rem;text-align:center;">
-  <div class="card-body" style="padding:2.5rem;">
+<div style="max-width:700px;margin:0 auto;padding:0 1.5rem 3rem;">
+  {% if failed %}
+  <div class="card" style="text-align:center;padding:2rem;">
+    <i class="fas fa-circle-xmark" style="font-size:3rem;color:var(--danger);margin-bottom:1rem;display:block;"></i>
+    <h2>Failed</h2>
+    <p style="color:var(--gray-500);">You left the exam before submitting, so it's marked as a fail.</p>
+    <a href="{{ url_for('student_exams') }}" class="btn btn-primary" style="margin-top:1rem;">Back to Exams</a>
+  </div>
+  {% else %}
+  <div class="card" style="text-align:center;padding:2rem;margin-bottom:1.5rem;">
     <i class="fas fa-trophy" style="font-size:3rem;color:var(--warning);margin-bottom:1rem;display:block;"></i>
-    <h2 style="font-family:var(--font-display);font-size:2.2rem;margin-bottom:0.5rem;">
-      {{ attempt.score }} / {{ attempt.total }}
-    </h2>
-    <p style="color:var(--gray-500);">Submitted at {{ attempt.submitted_at[11:16] if attempt.submitted_at else '' }}</p>
+    <h2 style="font-family:var(--font-display);font-size:2rem;">{{ attempt.score }} / {{ attempt.total }}</h2>
+    <p style="color:var(--gray-500);">
+      {{ "Excellent! 🎉" if attempt.score >= attempt.total*0.8 else "Good job! Keep practicing." if attempt.score >= attempt.total*0.5 else "Keep going! You'll do better next time." }}
+    </p>
   </div>
-</div>
 
-<div class="card" style="max-width:700px;margin:0 auto 2rem;">
-  <div class="card-header"><h3><i class="fas fa-robot"></i> AI Evaluation</h3></div>
-  <div class="card-body">
-    <p style="white-space:pre-wrap;">{{ attempt.ai_feedback }}</p>
-  </div>
-</div>
-
-<div class="card" style="max-width:700px;margin:0 auto;">
-  <div class="card-header"><h3><i class="fas fa-list-check"></i> Answer Review</h3></div>
-  <div class="card-body">
-    {% for item in breakdown %}
-    <div style="padding:1rem 0;border-bottom:1px solid var(--gray-300);">
-      <p class="question-text" style="margin-bottom:0.6rem;">{{ loop.index }}. {{ item.question }}</p>
-      <div class="options">
-        {% for key, label in [('A', item.option_a), ('B', item.option_b), ('C', item.option_c), ('D', item.option_d)] %}
-        <div class="option-btn
-          {% if key == item.correct_answer %}correct
-          {% elif key == item.selected and not item.is_correct %}wrong
-          {% endif %}" style="cursor:default;">
-          {{ key }}. {{ label }}
-          {% if key == item.correct_answer %} <i class="fas fa-check"></i>{% endif %}
-          {% if key == item.selected and not item.is_correct %} <i class="fas fa-xmark"></i>{% endif %}
-        </div>
-        {% endfor %}
-      </div>
-      {% if not item.selected %}
-      <p style="color:var(--gray-500);font-size:0.85rem;margin-top:0.4rem;">You did not answer this question.</p>
+  {% for f in feedback %}
+  <div class="card" style="margin-bottom:1rem;">
+    <div class="card-body">
+      <p><strong>{{ loop.index }}. {{ f.question }}</strong></p>
+      <p style="font-size:0.9rem;margin-top:0.5rem;">
+        Your answer: <span style="color:{{ 'var(--success)' if f.is_correct else 'var(--danger)' }};font-weight:600;">
+          {{ f.selected or "No answer" }}
+        </span>
+        {% if not f.is_correct %}
+          — Correct answer: <span style="color:var(--success);font-weight:600;">{{ f.correct_answer }}</span>
+        {% endif %}
+      </p>
+      {% if f.explanation %}
+        <p style="color:var(--gray-500);font-size:0.85rem;margin-top:0.4rem;"><i class="fas fa-robot"></i> {{ f.explanation }}</p>
       {% endif %}
     </div>
-    {% endfor %}
   </div>
+  {% endfor %}
+  <div style="text-align:center;margin-top:1rem;">
+    <a href="{{ url_for('student_exams') }}" class="btn btn-outline">Back to Exams</a>
+  </div>
+  {% endif %}
 </div>
-
-<div style="text-align:center;margin-top:2rem;">
-  <a href="{{ url_for('list_exams_student') }}" class="btn btn-outline">Back to Exams</a>
-</div>
+{% endblock %}
+{% block scripts %}
+{% if not failed and attempt.score >= attempt.total * 0.8 %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/canvas-confetti/1.9.2/confetti.browser.min.js"></script>
+<script>
+  // A great score earns a confetti burst — colors match the site's
+  // highlighter accent palette.
+  window.addEventListener("load", celebrate);
+</script>
+{% endif %}
 {% endblock %}
